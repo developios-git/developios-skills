@@ -63,9 +63,17 @@ The onboarding skill creates a small profile + token vault under your home direc
 ~/.developios/
 ├── profile.json                # Your name, role, OS, install timestamps
 ├── checklist.md                # Live task list — ticks as items are installed
-├── tokens.md                   # API keys you paste in during setup (chmod 600)
-└── onboarding-report-*.md      # Summary of what got installed
+├── CLAUDE.md                   # Persistent memory file — future Claude sessions read this
+├── tokens.md                   # API keys (chmod 600, gitignored, never echoed)
+├── onboarding-report-*.md      # Summary of what got installed
+├── .git/                       # Local backup repo (no remote)
+├── .gitignore                  # Excludes tokens.md and *.log
+└── backup.log                  # Output of the daily cron
 ```
+
+**Memory file.** The onboarding skill creates `~/.developios/CLAUDE.md` and imports it from `~/.claude/CLAUDE.md` so every future Claude Code session on this machine reads it. The file holds your identity, working preferences (Claude appends here when it learns how you like to work), and maintenance rules for handling tokens and preferences.
+
+**Daily local backup.** During onboarding, the skill offers to init `~/.developios/` as a local git repo and install a cron entry that commits the state every day at 9 PM. No remote — your snapshots stay on your machine. `tokens.md` is gitignored.
 
 **Tokens never leave your laptop.** They are not echoed back, not committed to git, not sent anywhere.
 

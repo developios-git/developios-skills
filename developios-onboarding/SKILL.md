@@ -1,6 +1,6 @@
 ---
 name: developios-onboarding
-description: Interactive Developios team onboarding for Claude Code. Collects the user's name and role, generates a personalized install checklist, then walks through the local MCPs, CLIs, skill packs, and tokens they need — one step at a time. Use when the user says "onboard me", "set me up", "I'm new at Developios", "/developios-onboarding", "help me get started", "install everything I need", or asks how to get set up at Developios.
+description: Interactive Developios team onboarding for Claude Code. Collects the user's name and role, generates a personalized install checklist, walks through local MCPs, CLIs, skill packs, and tokens one at a time, writes a persistent memory file at ~/.developios/CLAUDE.md, and sets up a daily local git backup of the user's Developios state. Use when the user says "onboard me", "set me up", "I'm new at Developios", "/developios-onboarding", "help me get started", "install everything I need", or asks how to get set up at Developios.
 ---
 
 # Developios Onboarding
@@ -109,6 +109,80 @@ Update `profile.json` → `last_step: "foundations"`.
 
 ---
 
+## Step 3.5 — Memory file (so future Claude sessions remember the user)
+
+This step gives the user a persistent memory file that every future Claude Code session on their machine will read. It also bakes in the maintenance rules — token appends, preference logging — so Claude keeps the file useful over time.
+
+### 3.5.1 Write the user's memory file
+
+Write `~/.developios/CLAUDE.md` (substitute fields from `profile.json`):
+
+```markdown
+# Developios — User profile and ongoing notes
+
+> This file is read automatically by Claude Code on this machine. Keep it up to date.
+
+## Identity
+- Name: <name>
+- Role: <role>
+- Email: <email>
+- OS: <os>
+- Meetings track: <yes/no>
+- Joined Developios setup: <started_at>
+
+## Working preferences
+(Claude will append observations here as it learns how the user wants to work.)
+
+## Reference paths
+- Profile: `~/.developios/profile.json`
+- Token vault: `~/.developios/tokens.md` (chmod 600 — never echo, never commit)
+- Checklist: `~/.developios/checklist.md`
+- Backup repo: `~/.developios/` is a local git repo. A cron entry commits changes daily at 9 PM. `tokens.md` and `*.log` are gitignored.
+
+## Maintenance rules for Claude (read every session)
+
+1. **Tokens.** Whenever the user pastes a new API token, append to `~/.developios/tokens.md` as:
+   ```
+   ## <SERVICE>
+   <token>
+   added: <ISO date>
+   ```
+   Then run `chmod 600 ~/.developios/tokens.md`. Never echo a token back. Never commit `tokens.md`.
+
+2. **Preferences.** When the user corrects how you work, or confirms a non-obvious approach, append a one-liner to the **Working preferences** section above with the date. Format: `- YYYY-MM-DD — <rule>. Why: <reason>.`
+
+3. **Stay current.** If you notice a fact in this file is no longer true (role change, new OS, etc.), update it inline. Do not keep stale info.
+
+4. **Don't write to backup.** The cron handles commits. You only edit the source files in `~/.developios/`.
+
+## Developios reference docs
+
+- [SOP — MCPs & CLIs by Role](https://www.notion.so/35dc990664318146a7bdd97980f8b47f)
+- [AI Adoption Part 1](https://www.notion.so/35dc990664318101a1bcd87cc33a78d3)
+- [AI Adoption Part 2](https://www.notion.so/35dc9906643181ef9fa2fea07097b137)
+- [AI Adoption Part 3](https://www.notion.so/35dc990664318171b6ddcea4a4721dcb)
+- [SOPs Dashboard](https://www.notion.so/297c9906643180e08b62d5b364d72f59)
+```
+
+### 3.5.2 Hook it into Claude Code's user-scope memory
+
+Make `~/.claude/CLAUDE.md` reference the file. Logic:
+
+- If `~/.claude/CLAUDE.md` does not exist → create it with a single line:
+  ```
+  @~/.developios/CLAUDE.md
+  ```
+- If it exists and does **not** already contain `@~/.developios/CLAUDE.md` → append the import line at the bottom.
+- If it already contains the line → leave it alone.
+
+Verify by `grep -F '@~/.developios/CLAUDE.md' ~/.claude/CLAUDE.md` and confirming a match.
+
+Tell the user: "Memory file at `~/.developios/CLAUDE.md`. Future Claude sessions on this machine will read it automatically."
+
+Update `profile.json` → `last_step: "memory"`.
+
+---
+
 ## Step 4 — Role-specific toolkit
 
 Walk through the items from the role matrix, in this order:
@@ -173,7 +247,71 @@ Update `profile.json` → `last_step: "verification"`.
 
 ---
 
+## Step 6.5 — Local backup (daily git commits)
+
+Set up `~/.developios/` itself as a local git repo, with a cron entry that commits the state daily. Local-only — no remote push. Tokens excluded.
+
+### 6.5.1 Initialize the repo
+
+Ask: "Set up daily local backups of your Developios state (profile, memory, checklist, reports)? Tokens are excluded. (y/n)"
+
+If y:
+
+1. **gitignore first** — write `~/.developios/.gitignore`:
+   ```
+   tokens.md
+   *.log
+   .DS_Store
+   ```
+
+2. **Init + first commit:**
+   ```bash
+   cd ~/.developios
+   git init -q -b main
+   git config user.name "<name from profile>"
+   git config user.email "<email from profile>"
+   git add -A
+   git commit -q -m "initial onboarding snapshot $(date -u +%FT%TZ)"
+   ```
+
+3. Confirm: `git -C ~/.developios log --oneline | head -3`.
+
+### 6.5.2 Install the daily cron
+
+Check if cron is available: `command -v crontab`.
+
+- **If available** (Linux / WSL / most macOS):
+
+  Build the cron line:
+  ```
+  0 21 * * * cd ~/.developios && /usr/bin/git add -A && /usr/bin/git commit -m "daily snapshot $(date -u +\%FT\%TZ)" --allow-empty >> ~/.developios/backup.log 2>&1
+  ```
+
+  Append it idempotently:
+  ```bash
+  (crontab -l 2>/dev/null | grep -v 'developios/backup.log'; \
+   echo '0 21 * * * cd ~/.developios && git add -A && git commit -m "daily snapshot $(date -u +\%FT\%TZ)" --allow-empty >> ~/.developios/backup.log 2>&1') | crontab -
+  ```
+
+  Verify: `crontab -l | grep developios`.
+
+- **If cron is missing** (rare — some minimal macOS / WSL setups): tell the user and print this manual command they can run anytime, plus suggest enabling cron in their environment.
+  ```bash
+  cd ~/.developios && git add -A && git commit -m "snapshot" --allow-empty
+  ```
+
+If user says n: skip — note in `profile.skipped`.
+
+Update `profile.json` → `last_step: "backup"`.
+
+---
+
 ## Step 7 — Wrap up
+
+Trigger a final backup commit if the backup repo was set up (Step 6.5):
+```bash
+cd ~/.developios && git add -A && git commit -m "onboarding complete $(date -u +%FT%TZ)" --allow-empty
+```
 
 Generate `~/.developios/onboarding-report-<YYYY-MM-DD>.md`:
 
